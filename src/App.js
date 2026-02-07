@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, TrendingUp, DollarSign, BarChart3, Calendar, Download, Plus, X, Filter as FilterIcon, TrendingDown } from 'lucide-react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
+import { Upload, TrendingUp, DollarSign, BarChart3, Calendar, Download, Plus, X, Filter as FilterIcon, TrendingDown, Edit2, Tag, Target, Image as ImageIcon, AlertCircle } from 'lucide-react';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, Cell } from 'recharts';
 
 const TradingJournal = () => {
   const [trades, setTrades] = useState([]);
@@ -15,6 +15,12 @@ const TradingJournal = () => {
   const [customDateEnd, setCustomDateEnd] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const tradesPerPage = 25;
+  const [availableTags, setAvailableTags] = useState(['Breakout', 'Reversal', 'Trend Following', 'Scalp', 'Swing', 'News']);
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [editingTrade, setEditingTrade] = useState(null);
+  const [showGoalsModal, setShowGoalsModal] = useState(false);
+  const [dailyGoals, setDailyGoals] = useState({ maxLoss: 500, targetProfit: 1000, maxTrades: 10 });
+  const [showImageModal, setShowImageModal] = useState(null);
 
   useEffect(() => {
     const stored = localStorage.getItem('tradingJournalData');
@@ -23,11 +29,29 @@ const TradingJournal = () => {
       setTrades(parsed);
       setFilteredTrades(parsed);
     }
+    
+    const storedTags = localStorage.getItem('availableTags');
+    if (storedTags) {
+      setAvailableTags(JSON.parse(storedTags));
+    }
+
+    const storedGoals = localStorage.getItem('dailyGoals');
+    if (storedGoals) {
+      setDailyGoals(JSON.parse(storedGoals));
+    }
   }, []);
 
   useEffect(() => {
     localStorage.setItem('tradingJournalData', JSON.stringify(trades));
   }, [trades]);
+
+  useEffect(() => {
+    localStorage.setItem('availableTags', JSON.stringify(availableTags));
+  }, [availableTags]);
+
+  useEffect(() => {
+    localStorage.setItem('dailyGoals', JSON.stringify(dailyGoals));
+  }, [dailyGoals]);
 
   const parseCSV = (text) => {
     const lines = text.replace(/\r\n/g, '\n').split('\n').filter(line => line.trim());
@@ -77,7 +101,10 @@ const TradingJournal = () => {
         fees: parseFloat(trade.fees || trade.commission || 0),
         notes: trade.notes || trade.comments || trade.duration || '',
         strategy: trade.strategy || trade.setup || '',
-        duration: trade.duration || ''
+        duration: trade.duration || '',
+        tags: trade.tags ? trade.tags.split(';') : [],
+        tradeNotes: '',
+        screenshots: []
       };
 
       if (!normalizedTrade.pnl && normalizedTrade.entryPrice && normalizedTrade.exitPrice && normalizedTrade.quantity) {
@@ -144,7 +171,10 @@ const TradingJournal = () => {
       ...tradeData,
       pnl: tradeData.side === 'long' 
         ? (tradeData.exitPrice - tradeData.entryPrice) * tradeData.quantity - (tradeData.fees || 0)
-        : (tradeData.entryPrice - tradeData.exitPrice) * tradeData.quantity - (tradeData.fees || 0)
+        : (tradeData.entryPrice - tradeData.exitPrice) * tradeData.quantity - (tradeData.fees || 0),
+      tags: tradeData.tags || [],
+      tradeNotes: tradeData.tradeNotes || '',
+      screenshots: []
     };
     
     setTrades(prev => [...prev, newTrade]);
@@ -153,6 +183,17 @@ const TradingJournal = () => {
     setUploadNotification({
       type: 'success',
       message: 'Trade added successfully!'
+    });
+    setTimeout(() => setUploadNotification(null), 3000);
+  };
+
+  const handleTradeUpdate = (updatedTrade) => {
+    setTrades(prev => prev.map(t => t.id === updatedTrade.id ? updatedTrade : t));
+    applyAllFilters(trades.map(t => t.id === updatedTrade.id ? updatedTrade : t));
+    setEditingTrade(null);
+    setUploadNotification({
+      type: 'success',
+      message: 'Trade updated successfully!'
     });
     setTimeout(() => setUploadNotification(null), 3000);
   };
@@ -185,7 +226,6 @@ const TradingJournal = () => {
     const totalWins = winning.reduce((sum, t) => sum + t.pnl, 0);
     const totalLosses = Math.abs(losing.reduce((sum, t) => sum + t.pnl, 0));
 
-    // Calculate max drawdown
     const sorted = [...filteredTrades].sort((a, b) => new Date(a.date) - new Date(b.date));
     let peak = 0;
     let maxDD = 0;
@@ -198,7 +238,6 @@ const TradingJournal = () => {
       if (drawdown > maxDD) maxDD = drawdown;
     });
 
-    // Calculate streaks
     let currentStreak = 0;
     let maxWinStreak = 0;
     let maxLoseStreak = 0;
@@ -213,16 +252,14 @@ const TradingJournal = () => {
       }
     });
 
-    // Calculate expectancy
     const winRate = winning.length / filteredTrades.length;
     const avgWin = winning.length > 0 ? totalWins / winning.length : 0;
     const avgLoss = losing.length > 0 ? totalLosses / losing.length : 0;
     const expectancy = (winRate * avgWin) - ((1 - winRate) * avgLoss);
 
-    // Calculate average R-multiple (reward/risk ratio)
     const rMultiples = filteredTrades
       .filter(t => t.pnl !== 0)
-      .map(t => Math.abs(t.pnl / (t.entryPrice * t.quantity * 0.02))); // Assuming 2% risk
+      .map(t => Math.abs(t.pnl / (t.entryPrice * t.quantity * 0.02)));
     const avgRMultiple = rMultiples.length > 0 
       ? rMultiples.reduce((a, b) => a + b, 0) / rMultiples.length 
       : 0;
@@ -245,6 +282,70 @@ const TradingJournal = () => {
       loseStreak: maxLoseStreak,
       avgRMultiple
     };
+  };
+
+  const getStrategyPerformance = () => {
+    const strategyMap = {};
+    
+    filteredTrades.forEach(trade => {
+      trade.tags.forEach(tag => {
+        if (!strategyMap[tag]) {
+          strategyMap[tag] = { strategy: tag, pnl: 0, trades: 0, wins: 0, losses: 0 };
+        }
+        strategyMap[tag].pnl += trade.pnl;
+        strategyMap[tag].trades += 1;
+        if (trade.pnl > 0) strategyMap[tag].wins += 1;
+        else if (trade.pnl < 0) strategyMap[tag].losses += 1;
+      });
+    });
+    
+    return Object.values(strategyMap).map(s => ({
+      ...s,
+      winRate: s.trades > 0 ? (s.wins / s.trades) * 100 : 0,
+      avgPnL: s.trades > 0 ? s.pnl / s.trades : 0
+    })).sort((a, b) => b.pnl - a.pnl);
+  };
+
+  const getTodayStats = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const todayTrades = trades.filter(t => t.date === today);
+    const todayPnL = todayTrades.reduce((sum, t) => sum + t.pnl, 0);
+    
+    return {
+      trades: todayTrades.length,
+      pnl: todayPnL,
+      maxLossHit: todayPnL <= -dailyGoals.maxLoss,
+      targetHit: todayPnL >= dailyGoals.targetProfit,
+      maxTradesHit: todayTrades.length >= dailyGoals.maxTrades
+    };
+  };
+
+  const getCalendarHeatmap = () => {
+    const dailyPnL = {};
+    
+    trades.forEach(trade => {
+      if (!dailyPnL[trade.date]) {
+        dailyPnL[trade.date] = 0;
+      }
+      dailyPnL[trade.date] += trade.pnl;
+    });
+    
+    // Get last 90 days
+    const days = [];
+    const today = new Date();
+    for (let i = 89; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      days.push({
+        date: dateStr,
+        pnl: dailyPnL[dateStr] || 0,
+        day: date.getDay(),
+        week: Math.floor(i / 7)
+      });
+    }
+    
+    return days;
   };
 
   const getCumulativePnL = () => {
@@ -305,7 +406,6 @@ const TradingJournal = () => {
   const applyAllFilters = (tradeList = trades) => {
     let filtered = [...tradeList];
     
-    // Apply type filter
     if (filter === 'winners') {
       filtered = filtered.filter(t => t.pnl > 0);
     } else if (filter === 'losers') {
@@ -316,7 +416,13 @@ const TradingJournal = () => {
       filtered = filtered.filter(t => t.side === 'short' || t.side === 'sell');
     }
     
-    // Apply date range filter
+    // Tag filter
+    if (selectedTags.length > 0) {
+      filtered = filtered.filter(t => 
+        selectedTags.some(tag => t.tags && t.tags.includes(tag))
+      );
+    }
+    
     if (dateRange !== 'all') {
       const now = new Date();
       let startDate = new Date();
@@ -354,11 +460,17 @@ const TradingJournal = () => {
     applyAllFilters();
   };
 
+  const toggleTagFilter = (tag) => {
+    setSelectedTags(prev => 
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
+  };
+
   useEffect(() => {
     applyAllFilters();
-    setCurrentPage(1); // Reset to first page when filters change
+    setCurrentPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, dateRange, customDateStart, customDateEnd]);
+  }, [filter, dateRange, customDateStart, customDateEnd, selectedTags]);
 
   const sortTrades = (field) => {
     const newOrder = sortBy === field && sortOrder === 'asc' ? 'desc' : 'asc';
@@ -385,7 +497,7 @@ const TradingJournal = () => {
   };
 
   const exportToCSV = () => {
-    const headers = ['Date', 'Symbol', 'Side', 'Quantity', 'Entry Price', 'Exit Price', 'P&L', 'Fees', 'Duration', 'Notes'];
+    const headers = ['Date', 'Symbol', 'Side', 'Quantity', 'Entry Price', 'Exit Price', 'P&L', 'Fees', 'Duration', 'Tags', 'Notes'];
     const rows = filteredTrades.map(t => [
       t.date,
       t.symbol,
@@ -396,7 +508,8 @@ const TradingJournal = () => {
       t.pnl,
       t.fees || 0,
       t.duration || '',
-      t.notes || ''
+      (t.tags || []).join(';'),
+      t.tradeNotes || t.notes || ''
     ]);
     
     const csvContent = [
@@ -425,8 +538,10 @@ const TradingJournal = () => {
   const cumulativePnL = getCumulativePnL();
   const symbolBreakdown = getSymbolBreakdown();
   const dayOfWeekPerformance = getPerformanceByDayOfWeek();
+  const strategyPerformance = getStrategyPerformance();
+  const todayStats = getTodayStats();
+  const calendarData = getCalendarHeatmap();
 
-  // Pagination calculations
   const totalPages = Math.ceil(filteredTrades.length / tradesPerPage);
   const indexOfLastTrade = currentPage * tradesPerPage;
   const indexOfFirstTrade = indexOfLastTrade - tradesPerPage;
@@ -515,8 +630,11 @@ const TradingJournal = () => {
           </div>
         )}
 
-        {/* Manual Trade Form Modal */}
-        {showTradeForm && <ManualTradeForm onSubmit={handleManualTradeSubmit} onClose={() => setShowTradeForm(false)} />}
+        {/* Modals */}
+        {showTradeForm && <ManualTradeForm onSubmit={handleManualTradeSubmit} onClose={() => setShowTradeForm(false)} availableTags={availableTags} />}
+        {editingTrade && <TradeEditModal trade={editingTrade} onUpdate={handleTradeUpdate} onClose={() => setEditingTrade(null)} availableTags={availableTags} />}
+        {showGoalsModal && <GoalsModal goals={dailyGoals} onSave={(goals) => { setDailyGoals(goals); setShowGoalsModal(false); }} onClose={() => setShowGoalsModal(false)} />}
+        {showImageModal && <ImageModal trade={showImageModal} onClose={() => setShowImageModal(null)} />}
 
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
@@ -528,6 +646,13 @@ const TradingJournal = () => {
           </div>
           {trades.length > 0 && (
             <div className="flex gap-2">
+              <button
+                onClick={() => setShowGoalsModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition"
+              >
+                <Target className="w-4 h-4" />
+                Goals
+              </button>
               <button
                 onClick={exportToCSV}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition"
@@ -545,6 +670,33 @@ const TradingJournal = () => {
             </div>
           )}
         </div>
+
+        {/* Daily Goals Alert */}
+        {trades.length > 0 && (todayStats.maxLossHit || todayStats.maxTradesHit) && (
+          <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <AlertCircle className="w-6 h-6 text-red-400" />
+            <div>
+              <h4 className="font-semibold text-red-400">Daily Limit Reached!</h4>
+              <p className="text-sm text-red-300">
+                {todayStats.maxLossHit && `Max loss limit reached ($${Math.abs(todayStats.pnl).toFixed(2)})`}
+                {todayStats.maxLossHit && todayStats.maxTradesHit && ' | '}
+                {todayStats.maxTradesHit && `Max trades limit reached (${todayStats.trades} trades)`}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {trades.length > 0 && todayStats.targetHit && !todayStats.maxLossHit && (
+          <div className="bg-cyan-500/10 border border-cyan-500/50 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <Target className="w-6 h-6 text-cyan-400" />
+            <div>
+              <h4 className="font-semibold text-cyan-400">Daily Target Hit! 🎯</h4>
+              <p className="text-sm text-cyan-300">
+                You've reached your daily profit target of ${dailyGoals.targetProfit.toFixed(2)}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Upload Section */}
         <div className="bg-gray-900 rounded-xl p-6 mb-6 border border-gray-800">
@@ -579,6 +731,32 @@ const TradingJournal = () => {
           </div>
         ) : (
           <>
+            {/* Tag Management */}
+            <div className="bg-gray-900 rounded-xl p-6 mb-6 border border-gray-800">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Tag className="w-5 h-5 text-cyan-400" />
+                  <h3 className="text-lg font-semibold">Filter by Strategy Tags</h3>
+                </div>
+                <TagManager tags={availableTags} onUpdate={setAvailableTags} />
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {availableTags.map(tag => (
+                  <button
+                    key={tag}
+                    onClick={() => toggleTagFilter(tag)}
+                    className={`px-3 py-1.5 rounded-lg text-sm transition ${
+                      selectedTags.includes(tag)
+                        ? 'bg-cyan-500 text-white'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Filters */}
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -586,7 +764,6 @@ const TradingJournal = () => {
                 <span className="text-gray-400 font-medium">Filters</span>
               </div>
               
-              {/* Type Filters */}
               <div className="flex gap-2 mb-3 flex-wrap">
                 <button
                   onClick={() => applyFilters('all')}
@@ -620,7 +797,6 @@ const TradingJournal = () => {
                 </button>
               </div>
 
-              {/* Date Range Filters */}
               <div className="flex gap-2 flex-wrap items-center">
                 <Calendar className="w-4 h-4 text-gray-500" />
                 <button
@@ -743,9 +919,55 @@ const TradingJournal = () => {
               </div>
             </div>
 
+            {/* Strategy Performance */}
+            {strategyPerformance.length > 0 && (
+              <div className="bg-gray-900 rounded-xl p-6 mb-6 border border-gray-800">
+                <h3 className="text-lg font-semibold mb-4">Strategy Performance</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-800">
+                        <th className="text-left py-3 px-4 text-gray-400 font-medium">Strategy</th>
+                        <th className="text-left py-3 px-4 text-gray-400 font-medium">Trades</th>
+                        <th className="text-left py-3 px-4 text-gray-400 font-medium">Win Rate</th>
+                        <th className="text-left py-3 px-4 text-gray-400 font-medium">Total P&L</th>
+                        <th className="text-left py-3 px-4 text-gray-400 font-medium">Avg P&L</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {strategyPerformance.map((strat, index) => (
+                        <tr key={index} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-1 bg-gray-800 rounded text-sm">{strat.strategy}</span>
+                          </td>
+                          <td className="py-3 px-4 text-sm">{strat.trades}</td>
+                          <td className="py-3 px-4 text-sm">
+                            <span className={strat.winRate >= 50 ? 'text-cyan-400' : 'text-red-400'}>
+                              {strat.winRate.toFixed(1)}%
+                            </span>
+                          </td>
+                          <td className={`py-3 px-4 font-medium ${strat.pnl >= 0 ? 'text-cyan-400' : 'text-red-400'}`}>
+                            ${strat.pnl.toFixed(2)}
+                          </td>
+                          <td className={`py-3 px-4 ${strat.avgPnL >= 0 ? 'text-cyan-400' : 'text-red-400'}`}>
+                            ${strat.avgPnL.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Calendar Heatmap */}
+            <div className="bg-gray-900 rounded-xl p-6 mb-6 border border-gray-800">
+              <h3 className="text-lg font-semibold mb-4">90-Day Performance Calendar</h3>
+              <CalendarHeatmap data={calendarData} />
+            </div>
+
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              {/* Cumulative P&L with Drawdown */}
               <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
                 <h3 className="text-lg font-semibold mb-4">Equity Curve & Drawdown</h3>
                 <ResponsiveContainer width="100%" height={250}>
@@ -773,7 +995,6 @@ const TradingJournal = () => {
                 </ResponsiveContainer>
               </div>
 
-              {/* Performance by Day of Week */}
               <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
                 <h3 className="text-lg font-semibold mb-4">Performance by Day of Week</h3>
                 <ResponsiveContainer width="100%" height={250}>
@@ -790,7 +1011,6 @@ const TradingJournal = () => {
                 </ResponsiveContainer>
               </div>
 
-              {/* Symbol Performance */}
               <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
                 <h3 className="text-lg font-semibold mb-4">Top Symbols by P&L</h3>
                 <ResponsiveContainer width="100%" height={250}>
@@ -807,7 +1027,6 @@ const TradingJournal = () => {
                 </ResponsiveContainer>
               </div>
 
-              {/* Streaks & Additional Stats */}
               <div className="bg-gray-900 rounded-xl p-6 border border-gray-800">
                 <h3 className="text-lg font-semibold mb-4">Streak Analysis</h3>
                 <div className="space-y-4">
@@ -864,7 +1083,8 @@ const TradingJournal = () => {
                       <th className="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-gray-300" onClick={() => sortTrades('pnl')}>
                         P&L {sortBy === 'pnl' && (sortOrder === 'asc' ? '↑' : '↓')}
                       </th>
-                      <th className="text-left py-3 px-4 text-gray-400 font-medium">Duration</th>
+                      <th className="text-left py-3 px-4 text-gray-400 font-medium">Tags</th>
+                      <th className="text-left py-3 px-4 text-gray-400 font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -883,14 +1103,29 @@ const TradingJournal = () => {
                         <td className={`py-3 px-4 font-medium ${trade.pnl >= 0 ? 'text-cyan-400' : 'text-red-400'}`}>
                           ${trade.pnl.toFixed(2)}
                         </td>
-                        <td className="py-3 px-4 text-sm text-gray-400">{trade.duration || trade.notes}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex gap-1 flex-wrap">
+                            {(trade.tags || []).map((tag, i) => (
+                              <span key={i} className="text-xs px-2 py-0.5 bg-gray-800 rounded">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <button
+                            onClick={() => setEditingTrade(trade)}
+                            className="text-gray-400 hover:text-cyan-400 transition"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
 
-              {/* Pagination Controls */}
               {totalPages > 1 && (
                 <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-800">
                   <button
@@ -906,7 +1141,6 @@ const TradingJournal = () => {
                   </button>
 
                   <div className="flex gap-2">
-                    {/* First Page */}
                     {currentPage > 3 && (
                       <>
                         <button
@@ -919,10 +1153,8 @@ const TradingJournal = () => {
                       </>
                     )}
 
-                    {/* Page Numbers */}
                     {[...Array(totalPages)].map((_, index) => {
                       const pageNumber = index + 1;
-                      // Show current page and 2 pages before and after
                       if (
                         pageNumber === currentPage ||
                         (pageNumber >= currentPage - 2 && pageNumber <= currentPage + 2)
@@ -944,7 +1176,6 @@ const TradingJournal = () => {
                       return null;
                     })}
 
-                    {/* Last Page */}
                     {currentPage < totalPages - 2 && (
                       <>
                         {currentPage < totalPages - 3 && <span className="px-2 py-2 text-gray-500">...</span>}
@@ -980,7 +1211,7 @@ const TradingJournal = () => {
 };
 
 // Manual Trade Entry Form Component
-const ManualTradeForm = ({ onSubmit, onClose }) => {
+const ManualTradeForm = ({ onSubmit, onClose, availableTags }) => {
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     symbol: '',
@@ -990,7 +1221,9 @@ const ManualTradeForm = ({ onSubmit, onClose }) => {
     exitPrice: '',
     fees: '',
     notes: '',
-    duration: ''
+    duration: '',
+    tags: [],
+    tradeNotes: ''
   });
 
   const handleSubmit = (e) => {
@@ -1004,9 +1237,18 @@ const ManualTradeForm = ({ onSubmit, onClose }) => {
     });
   };
 
+  const toggleTag = (tag) => {
+    setFormData(prev => ({
+      ...prev,
+      tags: prev.tags.includes(tag)
+        ? prev.tags.filter(t => t !== tag)
+        : [...prev.tags, tag]
+    }));
+  };
+
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-xl font-bold">Add Trade Manually</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white">
@@ -1015,52 +1257,56 @@ const ManualTradeForm = ({ onSubmit, onClose }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Date</label>
-            <input
-              type="date"
-              value={formData.date}
-              onChange={(e) => setFormData({...formData, date: e.target.value})}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
-              required
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Date</label>
+              <input
+                type="date"
+                value={formData.date}
+                onChange={(e) => setFormData({...formData, date: e.target.value})}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Symbol</label>
+              <input
+                type="text"
+                value={formData.symbol}
+                onChange={(e) => setFormData({...formData, symbol: e.target.value.toUpperCase()})}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                placeholder="AAPL, TSLA, etc."
+                required
+              />
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Symbol</label>
-            <input
-              type="text"
-              value={formData.symbol}
-              onChange={(e) => setFormData({...formData, symbol: e.target.value.toUpperCase()})}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
-              placeholder="AAPL, TSLA, etc."
-              required
-            />
-          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Side</label>
+              <select
+                value={formData.side}
+                onChange={(e) => setFormData({...formData, side: e.target.value})}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+              >
+                <option value="long">Long</option>
+                <option value="short">Short</option>
+              </select>
+            </div>
 
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Side</label>
-            <select
-              value={formData.side}
-              onChange={(e) => setFormData({...formData, side: e.target.value})}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
-            >
-              <option value="long">Long</option>
-              <option value="short">Short</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Quantity</label>
-            <input
-              type="number"
-              step="0.01"
-              value={formData.quantity}
-              onChange={(e) => setFormData({...formData, quantity: e.target.value})}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
-              placeholder="100"
-              required
-            />
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Quantity</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.quantity}
+                onChange={(e) => setFormData({...formData, quantity: e.target.value})}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                placeholder="100"
+                required
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -1104,13 +1350,33 @@ const ManualTradeForm = ({ onSubmit, onClose }) => {
           </div>
 
           <div>
-            <label className="block text-sm text-gray-400 mb-1">Notes (optional)</label>
+            <label className="block text-sm text-gray-400 mb-2">Strategy Tags</label>
+            <div className="flex gap-2 flex-wrap">
+              {availableTags.map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTag(tag)}
+                  className={`px-3 py-1.5 rounded-lg text-sm transition ${
+                    formData.tags.includes(tag)
+                      ? 'bg-cyan-500 text-white'
+                      : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Trade Notes (optional)</label>
             <textarea
-              value={formData.notes}
-              onChange={(e) => setFormData({...formData, notes: e.target.value})}
+              value={formData.tradeNotes}
+              onChange={(e) => setFormData({...formData, tradeNotes: e.target.value})}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
               rows="3"
-              placeholder="Trade notes, strategy, etc."
+              placeholder="What was your thesis? How did you feel? What happened?"
             />
           </div>
 
@@ -1130,6 +1396,409 @@ const ManualTradeForm = ({ onSubmit, onClose }) => {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+};
+
+// Trade Edit Modal Component
+const TradeEditModal = ({ trade, onUpdate, onClose, availableTags }) => {
+  const [formData, setFormData] = useState({
+    ...trade,
+    tags: trade.tags || [],
+    tradeNotes: trade.tradeNotes || ''
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onUpdate({
+      ...formData,
+      quantity: parseFloat(formData.quantity),
+      entryPrice: parseFloat(formData.entryPrice),
+      exitPrice: parseFloat(formData.exitPrice),
+      fees: parseFloat(formData.fees || 0),
+      pnl: formData.side === 'long'
+        ? (parseFloat(formData.exitPrice) - parseFloat(formData.entryPrice)) * parseFloat(formData.quantity) - parseFloat(formData.fees || 0)
+        : (parseFloat(formData.entryPrice) - parseFloat(formData.exitPrice)) * parseFloat(formData.quantity) - parseFloat(formData.fees || 0)
+    });
+  };
+
+  const toggleTag = (tag) => {
+    setFormData(prev => ({
+      ...prev,
+      tags: prev.tags.includes(tag)
+        ? prev.tags.filter(t => t !== tag)
+        : [...prev.tags, tag]
+    }));
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold">Edit Trade</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Date</label>
+              <input
+                type="date"
+                value={formData.date}
+                onChange={(e) => setFormData({...formData, date: e.target.value})}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Symbol</label>
+              <input
+                type="text"
+                value={formData.symbol}
+                onChange={(e) => setFormData({...formData, symbol: e.target.value.toUpperCase()})}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Side</label>
+              <select
+                value={formData.side}
+                onChange={(e) => setFormData({...formData, side: e.target.value})}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+              >
+                <option value="long">Long</option>
+                <option value="short">Short</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Quantity</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.quantity}
+                onChange={(e) => setFormData({...formData, quantity: e.target.value})}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Entry Price</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.entryPrice}
+                onChange={(e) => setFormData({...formData, entryPrice: e.target.value})}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Exit Price</label>
+              <input
+                type="number"
+                step="0.01"
+                value={formData.exitPrice}
+                onChange={(e) => setFormData({...formData, exitPrice: e.target.value})}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Fees</label>
+            <input
+              type="number"
+              step="0.01"
+              value={formData.fees}
+              onChange={(e) => setFormData({...formData, fees: e.target.value})}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Strategy Tags</label>
+            <div className="flex gap-2 flex-wrap">
+              {availableTags.map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTag(tag)}
+                  className={`px-3 py-1.5 rounded-lg text-sm transition ${
+                    formData.tags.includes(tag)
+                      ? 'bg-cyan-500 text-white'
+                      : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Trade Notes</label>
+            <textarea
+              value={formData.tradeNotes}
+              onChange={(e) => setFormData({...formData, tradeNotes: e.target.value})}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+              rows="4"
+              placeholder="Add notes about this trade..."
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="submit"
+              className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg font-medium transition"
+            >
+              Update Trade
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Tag Manager Component
+const TagManager = ({ tags, onUpdate }) => {
+  const [showModal, setShowModal] = useState(false);
+  const [newTag, setNewTag] = useState('');
+
+  const handleAdd = () => {
+    if (newTag && !tags.includes(newTag)) {
+      onUpdate([...tags, newTag]);
+      setNewTag('');
+    }
+  };
+
+  const handleRemove = (tag) => {
+    onUpdate(tags.filter(t => t !== tag));
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setShowModal(true)}
+        className="text-sm px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition"
+      >
+        Manage Tags
+      </button>
+
+      {showModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 max-w-md w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Manage Strategy Tags</h3>
+              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newTag}
+                  onChange={(e) => setNewTag(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleAdd()}
+                  placeholder="New tag name..."
+                  className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+                />
+                <button
+                  onClick={handleAdd}
+                  className="px-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-white rounded-lg transition"
+                >
+                  Add
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {tags.map(tag => (
+                  <div key={tag} className="flex items-center justify-between px-3 py-2 bg-gray-800 rounded-lg">
+                    <span>{tag}</span>
+                    <button
+                      onClick={() => handleRemove(tag)}
+                      className="text-red-400 hover:text-red-300"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+// Goals Modal Component
+const GoalsModal = ({ goals, onSave, onClose }) => {
+  const [formData, setFormData] = useState(goals);
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 max-w-md w-full">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold">Daily Trading Goals</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Max Daily Loss ($)</label>
+            <input
+              type="number"
+              step="10"
+              value={formData.maxLoss}
+              onChange={(e) => setFormData({...formData, maxLoss: parseFloat(e.target.value)})}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+            />
+            <p className="text-xs text-gray-500 mt-1">Stop trading when you hit this loss</p>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Daily Profit Target ($)</label>
+            <input
+              type="number"
+              step="10"
+              value={formData.targetProfit}
+              onChange={(e) => setFormData({...formData, targetProfit: parseFloat(e.target.value)})}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+            />
+            <p className="text-xs text-gray-500 mt-1">Your daily profit goal</p>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Max Daily Trades</label>
+            <input
+              type="number"
+              value={formData.maxTrades}
+              onChange={(e) => setFormData({...formData, maxTrades: parseInt(e.target.value)})}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white"
+            />
+            <p className="text-xs text-gray-500 mt-1">Maximum number of trades per day</p>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={() => onSave(formData)}
+              className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg font-medium transition"
+            >
+              Save Goals
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Image Modal Component (placeholder for future implementation)
+const ImageModal = ({ trade, onClose }) => {
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 max-w-2xl w-full">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold">Trade Screenshots - {trade.symbol}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="text-center py-12 text-gray-400">
+          <ImageIcon className="w-16 h-16 mx-auto mb-4" />
+          <p>Screenshot upload coming soon!</p>
+          <p className="text-sm mt-2">Capture and attach chart images to your trades</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Calendar Heatmap Component
+const CalendarHeatmap = ({ data }) => {
+  const getColor = (pnl) => {
+    if (pnl === 0) return '#1f2937';
+    if (pnl > 0) {
+      if (pnl > 500) return '#10b981';
+      if (pnl > 200) return '#34d399';
+      if (pnl > 50) return '#6ee7b7';
+      return '#a7f3d0';
+    } else {
+      if (pnl < -500) return '#ef4444';
+      if (pnl < -200) return '#f87171';
+      if (pnl < -50) return '#fca5a5';
+      return '#fecaca';
+    }
+  };
+
+  const weeks = [];
+  for (let i = 0; i < 13; i++) {
+    weeks.push(data.filter(d => d.week === i));
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="flex gap-1">
+        {weeks.map((week, weekIdx) => (
+          <div key={weekIdx} className="flex flex-col gap-1">
+            {week.map((day, dayIdx) => (
+              <div
+                key={dayIdx}
+                className="w-3 h-3 rounded-sm"
+                style={{ backgroundColor: getColor(day.pnl) }}
+                title={`${day.date}: $${day.pnl.toFixed(2)}`}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-4 mt-4 text-xs text-gray-500">
+        <span>Less</span>
+        <div className="flex gap-1">
+          {['#1f2937', '#fecaca', '#fca5a5', '#f87171', '#ef4444'].map(color => (
+            <div key={color} className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
+          ))}
+        </div>
+        <span>Loss</span>
+        <div className="flex gap-1">
+          {['#a7f3d0', '#6ee7b7', '#34d399', '#10b981'].map(color => (
+            <div key={color} className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
+          ))}
+        </div>
+        <span>Profit</span>
       </div>
     </div>
   );
