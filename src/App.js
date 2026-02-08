@@ -28,6 +28,7 @@ const TradingJournal = () => {
   const [theme, setTheme] = useState('dark');
   const [selectedTrades, setSelectedTrades] = useState(new Set());
   const [bulkMode, setBulkMode] = useState(false);
+  const [reviewingTrade, setReviewingTrade] = useState(null);
 
   useEffect(() => {
     const stored = localStorage.getItem('tradingJournalData');
@@ -137,7 +138,18 @@ const TradingJournal = () => {
         duration: trade.duration || '',
         tags: trade.tags ? trade.tags.split(';') : [],
         tradeNotes: '',
-        screenshots: []
+        screenshots: [],
+        // Review fields
+        reviewed: false,
+        reviewDate: null,
+        executionQuality: null,
+        emotionalState: null,
+        whatWentRight: '',
+        whatWentWrong: '',
+        lessonsLearned: '',
+        wouldTakeAgain: null,
+        mistakesMade: [],
+        setupQuality: null
       };
 
       if (!normalizedTrade.pnl && normalizedTrade.entryPrice && normalizedTrade.exitPrice && normalizedTrade.quantity) {
@@ -207,7 +219,18 @@ const TradingJournal = () => {
         : (tradeData.entryPrice - tradeData.exitPrice) * tradeData.quantity - (tradeData.fees || 0),
       tags: tradeData.tags || [],
       tradeNotes: tradeData.tradeNotes || '',
-      screenshots: []
+      screenshots: [],
+      // Review fields
+      reviewed: false,
+      reviewDate: null,
+      executionQuality: null,
+      emotionalState: null,
+      whatWentRight: '',
+      whatWentWrong: '',
+      lessonsLearned: '',
+      wouldTakeAgain: null,
+      mistakesMade: [],
+      setupQuality: null
     };
     
     setTrades(prev => [...prev, newTrade]);
@@ -1153,6 +1176,10 @@ const TradingJournal = () => {
       filtered = filtered.filter(t => t.side === 'long' || t.side === 'buy');
     } else if (filter === 'short') {
       filtered = filtered.filter(t => t.side === 'short' || t.side === 'sell');
+    } else if (filter === 'reviewed') {
+      filtered = filtered.filter(t => t.reviewed === true);
+    } else if (filter === 'unreviewed') {
+      filtered = filtered.filter(t => !t.reviewed);
     }
     
     // Tag filter
@@ -1412,6 +1439,21 @@ const TradingJournal = () => {
             }}
           />
         )}
+        {reviewingTrade && (
+          <TradeReviewModal
+            trade={reviewingTrade}
+            onSave={(updatedTrade) => {
+              setTrades(prev => prev.map(t => t.id === updatedTrade.id ? updatedTrade : t));
+              setReviewingTrade(null);
+              setUploadNotification({
+                type: 'success',
+                message: 'Trade review saved successfully!'
+              });
+              setTimeout(() => setUploadNotification(null), 3000);
+            }}
+            onClose={() => setReviewingTrade(null)}
+          />
+        )}
 
         {/* Header */}
         <div className="mb-8 flex items-center justify-between">
@@ -1571,6 +1613,19 @@ const TradingJournal = () => {
                   className={`px-4 py-2 rounded-lg transition ${filter === 'short' ? 'bg-cyan-500 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
                 >
                   Short
+                </button>
+                <button
+                  onClick={() => applyFilters('reviewed')}
+                  className={`px-4 py-2 rounded-lg transition flex items-center gap-2 ${filter === 'reviewed' ? 'bg-purple-500 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                >
+                  <Lightbulb className="w-4 h-4" />
+                  Reviewed
+                </button>
+                <button
+                  onClick={() => applyFilters('unreviewed')}
+                  className={`px-4 py-2 rounded-lg transition ${filter === 'unreviewed' ? 'bg-yellow-500 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
+                >
+                  Needs Review
                 </button>
               </div>
 
@@ -1734,6 +1789,108 @@ const TradingJournal = () => {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+
+            {/* Review Progress */}
+            {trades.length > 0 && (
+              <div className="bg-gray-900 rounded-xl p-6 mb-6 border border-gray-800">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Lightbulb className="w-5 h-5 text-purple-400" />
+                    <h3 className="text-lg font-semibold">Trade Review Progress</h3>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const unreviewedTrades = filteredTrades.filter(t => !t.reviewed);
+                      if (unreviewedTrades.length > 0) {
+                        setReviewingTrade(unreviewedTrades[0]);
+                      }
+                    }}
+                    className="text-sm px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg transition"
+                  >
+                    Review Next Trade
+                  </button>
+                </div>
+
+                {(() => {
+                  const totalTrades = filteredTrades.length;
+                  const reviewedTrades = filteredTrades.filter(t => t.reviewed).length;
+                  const unreviewedTrades = totalTrades - reviewedTrades;
+                  const reviewProgress = totalTrades > 0 ? (reviewedTrades / totalTrades) * 100 : 0;
+
+                  // Calculate review statistics
+                  const reviewed = filteredTrades.filter(t => t.reviewed);
+                  const avgSetupQuality = reviewed.length > 0 
+                    ? reviewed.filter(t => t.setupQuality).reduce((sum, t) => sum + t.setupQuality, 0) / reviewed.filter(t => t.setupQuality).length
+                    : 0;
+                  const avgExecutionQuality = reviewed.length > 0
+                    ? reviewed.filter(t => t.executionQuality).reduce((sum, t) => sum + t.executionQuality, 0) / reviewed.filter(t => t.executionQuality).length
+                    : 0;
+                  const wouldTakeAgainCount = reviewed.filter(t => t.wouldTakeAgain === true).length;
+                  const wouldNotTakeAgainCount = reviewed.filter(t => t.wouldTakeAgain === false).length;
+
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div className="bg-gray-800/50 rounded-lg p-4">
+                          <div className="text-xs text-gray-400 mb-1">Reviewed</div>
+                          <div className="text-2xl font-bold text-purple-400">{reviewedTrades}</div>
+                          <div className="text-xs text-gray-500 mt-1">{reviewProgress.toFixed(0)}% complete</div>
+                        </div>
+                        <div className="bg-gray-800/50 rounded-lg p-4">
+                          <div className="text-xs text-gray-400 mb-1">Needs Review</div>
+                          <div className="text-2xl font-bold text-yellow-400">{unreviewedTrades}</div>
+                          <div className="text-xs text-gray-500 mt-1">Pending analysis</div>
+                        </div>
+                        <div className="bg-gray-800/50 rounded-lg p-4">
+                          <div className="text-xs text-gray-400 mb-1">Avg Setup Quality</div>
+                          <div className="text-2xl font-bold text-cyan-400">
+                            {avgSetupQuality > 0 ? `${avgSetupQuality.toFixed(1)}★` : 'N/A'}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">Out of 5 stars</div>
+                        </div>
+                        <div className="bg-gray-800/50 rounded-lg p-4">
+                          <div className="text-xs text-gray-400 mb-1">Avg Execution</div>
+                          <div className="text-2xl font-bold text-cyan-400">
+                            {avgExecutionQuality > 0 ? `${avgExecutionQuality.toFixed(1)}★` : 'N/A'}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">Out of 5 stars</div>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="mb-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm text-gray-400">Overall Review Progress</span>
+                          <span className="text-sm font-semibold text-purple-400">{reviewProgress.toFixed(0)}%</span>
+                        </div>
+                        <div className="w-full bg-gray-800 rounded-full h-3 overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-purple-500 to-purple-400 transition-all duration-500"
+                            style={{ width: `${reviewProgress}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Would Take Again Stats */}
+                      {reviewed.length > 0 && (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-gray-800/30 rounded-lg p-3">
+                            <div className="text-xs text-gray-400 mb-1">Would Take Again</div>
+                            <div className="text-lg font-semibold text-cyan-400">{wouldTakeAgainCount} trades</div>
+                            <div className="text-xs text-gray-500 mt-1">Good setups to repeat</div>
+                          </div>
+                          <div className="bg-gray-800/30 rounded-lg p-3">
+                            <div className="text-xs text-gray-400 mb-1">Would Avoid</div>
+                            <div className="text-lg font-semibold text-red-400">{wouldNotTakeAgainCount} trades</div>
+                            <div className="text-xs text-gray-500 mt-1">Setups to avoid</div>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
 
@@ -2382,8 +2539,24 @@ const TradingJournal = () => {
                         <td className="py-3 px-4">
                           <div className="flex gap-2 items-center">
                             <button
+                              onClick={() => setReviewingTrade(trade)}
+                              className={`relative transition ${
+                                trade.reviewed
+                                  ? 'text-purple-400 hover:text-purple-300'
+                                  : 'text-gray-500 hover:text-purple-400'
+                              }`}
+                              title={trade.reviewed ? 'Review completed' : 'Review trade'}
+                            >
+                              <Lightbulb className="w-4 h-4" />
+                              {trade.reviewed && (
+                                <span className="absolute -top-1 -right-1 bg-purple-500 text-white text-xs rounded-full w-3 h-3 flex items-center justify-center">
+                                  ✓
+                                </span>
+                              )}
+                            </button>
+                            <button
                               onClick={() => setShowImageModal(trade)}
-                              className={`transition ${
+                              className={`relative transition ${
                                 trade.screenshots?.length > 0
                                   ? 'text-cyan-400 hover:text-cyan-300'
                                   : 'text-gray-500 hover:text-gray-400'
@@ -2400,6 +2573,7 @@ const TradingJournal = () => {
                             <button
                               onClick={() => setEditingTrade(trade)}
                               className="text-gray-400 hover:text-cyan-400 transition"
+                              title="Edit trade"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
@@ -2862,6 +3036,258 @@ const TradeEditModal = ({ trade, onUpdate, onClose, availableTags }) => {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+};
+
+// Trade Review Modal Component
+const TradeReviewModal = ({ trade, onSave, onClose }) => {
+  const [reviewData, setReviewData] = useState({
+    reviewed: trade.reviewed || false,
+    executionQuality: trade.executionQuality || null,
+    emotionalState: trade.emotionalState || null,
+    whatWentRight: trade.whatWentRight || '',
+    whatWentWrong: trade.whatWentWrong || '',
+    lessonsLearned: trade.lessonsLearned || '',
+    wouldTakeAgain: trade.wouldTakeAgain || null,
+    mistakesMade: trade.mistakesMade || [],
+    setupQuality: trade.setupQuality || null
+  });
+
+  const commonMistakes = [
+    'FOMO Entry',
+    'Revenge Trading',
+    'Position Too Large',
+    'Ignored Stop Loss',
+    'Moved Stop Loss',
+    'Held Too Long',
+    'Exited Too Early',
+    'Traded Against Plan',
+    'Overtraded',
+    'Ignored Market Conditions',
+    'Poor Risk/Reward',
+    'Emotional Decision'
+  ];
+
+  const toggleMistake = (mistake) => {
+    setReviewData(prev => ({
+      ...prev,
+      mistakesMade: prev.mistakesMade.includes(mistake)
+        ? prev.mistakesMade.filter(m => m !== mistake)
+        : [...prev.mistakesMade, mistake]
+    }));
+  };
+
+  const handleSubmit = () => {
+    const updatedTrade = {
+      ...trade,
+      ...reviewData,
+      reviewed: true,
+      reviewDate: new Date().toISOString()
+    };
+    onSave(updatedTrade);
+  };
+
+  const RatingStars = ({ value, onChange, label }) => (
+    <div>
+      <label className="block text-sm text-gray-400 mb-2">{label}</label>
+      <div className="flex gap-2">
+        {[1, 2, 3, 4, 5].map(rating => (
+          <button
+            key={rating}
+            type="button"
+            onClick={() => onChange(rating)}
+            className={`w-10 h-10 rounded-lg transition ${
+              value >= rating
+                ? 'bg-yellow-500 text-white'
+                : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
+            }`}
+          >
+            ★
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const emotionOptions = ['Confident', 'Calm', 'Anxious', 'Fearful', 'Greedy', 'Revenge', 'Euphoric', 'Neutral'];
+
+  return (
+    <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 max-w-4xl w-full my-8">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-2xl font-bold">Trade Review & Analysis</h3>
+            <p className="text-gray-400 text-sm mt-1">
+              {trade.symbol} • {trade.date} • {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        {/* Trade Summary */}
+        <div className="bg-gray-800/50 rounded-lg p-4 mb-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div>
+            <div className="text-xs text-gray-500">Entry</div>
+            <div className="text-lg font-semibold">${trade.entryPrice.toFixed(2)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">Exit</div>
+            <div className="text-lg font-semibold">${trade.exitPrice.toFixed(2)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">Quantity</div>
+            <div className="text-lg font-semibold">{trade.quantity}</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500">P&L</div>
+            <div className={`text-lg font-semibold ${trade.pnl >= 0 ? 'text-cyan-400' : 'text-red-400'}`}>
+              ${trade.pnl.toFixed(2)}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2">
+          {/* Ratings Section */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <RatingStars
+              value={reviewData.setupQuality}
+              onChange={(val) => setReviewData({...reviewData, setupQuality: val})}
+              label="Setup Quality (1-5)"
+            />
+            <RatingStars
+              value={reviewData.executionQuality}
+              onChange={(val) => setReviewData({...reviewData, executionQuality: val})}
+              label="Execution Quality (1-5)"
+            />
+          </div>
+
+          {/* Emotional State */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Emotional State During Trade</label>
+            <div className="flex gap-2 flex-wrap">
+              {emotionOptions.map(emotion => (
+                <button
+                  key={emotion}
+                  type="button"
+                  onClick={() => setReviewData({...reviewData, emotionalState: emotion})}
+                  className={`px-3 py-2 rounded-lg text-sm transition ${
+                    reviewData.emotionalState === emotion
+                      ? 'bg-purple-500 text-white'
+                      : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  {emotion}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Mistakes Made */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Mistakes Made (if any)</label>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {commonMistakes.map(mistake => (
+                <button
+                  key={mistake}
+                  type="button"
+                  onClick={() => toggleMistake(mistake)}
+                  className={`px-3 py-2 rounded-lg text-sm transition ${
+                    reviewData.mistakesMade.includes(mistake)
+                      ? 'bg-red-500 text-white'
+                      : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  {mistake}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Would Take Again */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Would you take this trade again?</label>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setReviewData({...reviewData, wouldTakeAgain: true})}
+                className={`flex-1 px-4 py-3 rounded-lg transition ${
+                  reviewData.wouldTakeAgain === true
+                    ? 'bg-cyan-500 text-white'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                ✓ Yes
+              </button>
+              <button
+                type="button"
+                onClick={() => setReviewData({...reviewData, wouldTakeAgain: false})}
+                className={`flex-1 px-4 py-3 rounded-lg transition ${
+                  reviewData.wouldTakeAgain === false
+                    ? 'bg-red-500 text-white'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                ✗ No
+              </button>
+            </div>
+          </div>
+
+          {/* What Went Right */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">What Went Right? 🎯</label>
+            <textarea
+              value={reviewData.whatWentRight}
+              onChange={(e) => setReviewData({...reviewData, whatWentRight: e.target.value})}
+              className="w-full px-3 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white resize-none"
+              rows="3"
+              placeholder="Entry timing, patience, risk management, following plan..."
+            />
+          </div>
+
+          {/* What Went Wrong */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">What Went Wrong? ⚠️</label>
+            <textarea
+              value={reviewData.whatWentWrong}
+              onChange={(e) => setReviewData({...reviewData, whatWentWrong: e.target.value})}
+              className="w-full px-3 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white resize-none"
+              rows="3"
+              placeholder="Exit too early/late, ignored signals, poor entry..."
+            />
+          </div>
+
+          {/* Lessons Learned */}
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Key Lessons Learned 📚</label>
+            <textarea
+              value={reviewData.lessonsLearned}
+              onChange={(e) => setReviewData({...reviewData, lessonsLearned: e.target.value})}
+              className="w-full px-3 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white resize-none"
+              rows="3"
+              placeholder="What will you do differently next time? What did you learn?"
+            />
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex gap-3 pt-6 mt-6 border-t border-gray-800">
+          <button
+            onClick={handleSubmit}
+            className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-3 rounded-lg font-medium transition"
+          >
+            Save Review
+          </button>
+          <button
+            onClick={onClose}
+            className="px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );
